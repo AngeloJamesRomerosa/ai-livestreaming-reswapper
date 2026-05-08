@@ -1,0 +1,24 @@
+# GPU build — CUDA 12.x (Windows + Linux)
+#
+# IMPORTANT: onnxruntime-gpu on standard PyPI ships a CUDA 11 build.
+# Install from Microsoft's CUDA 12 index instead:
+#
+#   pip install -r requirements.txt --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
+#
+numpy>=1.24.0,<2.0.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+requests>=2.31.0
+tqdm>=4.65.0
+insightface>=0.7.3
+onnxruntime-gpu>=1.19.0
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+nvidia-cufft-cu12
+
+# FP16 model conversion (convert_fp16.py)
+onnx>=1.14.0
+onnxconverter-common>=1.13.0
+
+# Optional — requires OBS Virtual Camera installed and active on Windows
+pyvirtualcam>=0.10.0

@@ -1,0 +1,31 @@
+# For testing
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cpu  # testing using cpu
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda  # testing using gpu
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16  # test using fpp16 converted and auto 4 FPS cap (default)
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16 --max-swap-fps 7 # with limitation on FPS* can be (change/control)
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16 --max-swap-fps 4
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16 --max-swap-fps 0 # No cap
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16 --virtual-cam
+
+python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16 --virtual-cam --max-swap-fps 4
+
+# For testing female
+python run.py --source "Maira.jpg" --execution-provider cuda --fp16 --virtual-cam
+python run.py --source "Maira.jpg" --execution-provider cuda --fp16 --virtual-cam --max-swap-fps 4
+
+# OBS
+Sources → + → Video Capture Device
+Name it → OK
+Device dropdown → OBS Virtual Camera
+Click OK
+
+#
+cd reswapper_256_model
+cd ..\simswap_256_model
+
+#
+cd simswap_256_model
+cd ..\reswapper_256_model
+
+#
+https://medium.com/@fudinglun/how-i-got-a-live-face-swap-sdk-running-at-30fps-on-an-iphone-12-mini-with-512-resolution-e1c0b82f6241

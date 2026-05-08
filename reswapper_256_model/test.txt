@@ -1,0 +1,42 @@
+OBS INTEGRATION — QUICK REFERENCE
+==================================
+
+METHOD 1: Virtual Camera (recommended)
+---------------------------------------
+IMPORTANT: Do NOT start OBS Virtual Camera inside OBS before running the script.
+
+Step 1 — Run the script:
+    python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16 --virtual-cam
+
+Step 2 — Wait for this message in the terminal:
+    Virtual camera active: OBS Virtual Camera
+
+Step 3 — Open OBS Studio (do not click Start Virtual Camera)
+
+Step 4 — Add the feed:
+    Sources → + → Video Capture Device → OK
+    Device dropdown → OBS Virtual Camera → OK
+
+Step 5 — Face swap feed appears in OBS scene.
+
+NOTE: If OBS shows "Failed to start virtual camera" — click OK and ignore it.
+      The script already started it. Just add the Video Capture Device source.
+
+
+METHOD 2: Display Capture (fallback)
+--------------------------------------
+Step 1 — Run the script (no --virtual-cam flag):
+    python run.py --source "President_Barack_Obama.jpg" --execution-provider cuda --fp16
+
+Step 2 — Open OBS Studio
+
+Step 3 — Sources → + → Display Capture → OK → OK
+
+Step 4 — Your full screen appears in OBS.
+         Move/resize the face swap preview window on your desktop as needed.
+
+
+STOPPING THE SCRIPT
+--------------------
+- Click the face swap preview window, then press Q
+- Or press Ctrl+C in the PowerShell terminal

@@ -1,0 +1,11 @@
+# CPU-only — for testing the pipeline without a GPU / CUDA stack.
+# Performance will be well below the 30 FPS / 0.5 s targets; use for functional
+# validation only, not performance benchmarking.
+numpy>=1.24.0,<2.0.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+requests>=2.31.0
+tqdm>=4.65.0
+insightface>=0.7.3
+onnxruntime>=1.16.3
+pyvirtualcam>=0.10.0
