@@ -121,8 +121,8 @@ py -3.11 -m venv .venv
 pip install -r requirements.txt --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 # pip install -r requirements-cpu.txt   # CPU only
 
-python download_models.py             # downloads reswapper_256.onnx (~300 MB)
-python convert_fp16.py                # converts swap model to FP16 (one-time, ~10 s)
+python download_models.py             # downloads reswapper_256.onnx (~529 MB)
+python convert_fp16.py                # converts swap model to FP16 (~265 MB, one-time, ~10 s)
 ```
 
 > The `buffalo_l` detection model (~200 MB) is downloaded automatically by InsightFace on first run to `~/.insightface/models/buffalo_l/`.

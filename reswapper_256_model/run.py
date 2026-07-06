@@ -104,6 +104,25 @@ class Config:
     det_thresh: float
     det_size: int
     max_swap_fps: float
+    output_mode: str
+
+
+def _print_output_instructions(mode: str, virtual_cam: bool):
+    if not virtual_cam:
+        return
+    print()
+    if mode == "obs":
+        print("[output] Mode: OBS only")
+        print("         → Open OBS → Sources + → Video Capture Device → OBS Virtual Camera")
+    elif mode == "akool":
+        print("[output] Mode: AKOOL only")
+        print("         → Open AKOOL → set input to OBS Virtual Camera")
+        print("         → AKOOL Virtual Camera carries the enhanced output")
+    elif mode == "akool-obs":
+        print("[output] Mode: AKOOL → OBS")
+        print("         → Open AKOOL → set input to OBS Virtual Camera")
+        print("         → Open OBS → Sources + → Video Capture Device → AKOOL Virtual Camera")
+    print()
 
 
 def main():
@@ -129,6 +148,10 @@ def main():
                         help="Use FP16 swap model (run convert_fp16.py first)")
     parser.add_argument("--virtual-cam", action="store_true",
                         help="Send output to OBS Virtual Camera")
+    parser.add_argument("--output-mode",
+                        choices=["obs", "akool", "akool-obs"],
+                        default="obs",
+                        help="Streaming output mode: obs (OBS only), akool (AKOOL only), akool-obs (AKOOL → OBS)")
     parser.add_argument("--no-metrics", action="store_true",
                         help="Disable FPS/latency overlay")
     parser.add_argument("--det-thresh", type=float, default=0.7,
@@ -174,7 +197,10 @@ def main():
         det_thresh=args.det_thresh,
         det_size=args.det_size,
         max_swap_fps=args.max_swap_fps,
+        output_mode=args.output_mode,
     )
+
+    _print_output_instructions(cfg.output_mode, cfg.virtual_cam)
 
     # Deferred import keeps startup fast — insightface and onnxruntime are heavy
     # and only need to load after argument validation has already passed.

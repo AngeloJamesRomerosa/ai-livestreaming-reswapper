@@ -3,13 +3,10 @@ Download swap model files into the models/ directory.
 
 Available models (all from netrunner-exe/Insight-Swap-models-onnx on HuggingFace):
 
-  reswapper_256.onnx   (~300 MB)  Current default. INSwapper retrain at 256px.
-  simswap_256.onnx     (~300 MB)  Better expression/pose preservation.
+  reswapper_256.onnx   (~300 MB)  INSwapper retrain at 256px.
 
 Usage:
-  python download_models.py                        # downloads reswapper_256
-  python download_models.py --model simswap_256    # downloads simswap_256
-  python download_models.py --all                  # downloads both
+  python download_models.py   # downloads reswapper_256
 
 The buffalo_l detection/recognition pack (~200 MB) is downloaded automatically
 by InsightFace on first run and cached in ~/.insightface/models/buffalo_l/.
@@ -26,7 +23,6 @@ _HF_BASE = "https://huggingface.co/netrunner-exe/Insight-Swap-models-onnx/resolv
 
 KNOWN_MODELS = {
     "reswapper_256": f"{_HF_BASE}/reswapper_256.onnx",
-    "simswap_256":   f"{_HF_BASE}/simswap_256.onnx",
 }
 
 
@@ -79,21 +75,15 @@ def download_model(name: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Download face-swap ONNX models")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--model", choices=list(KNOWN_MODELS), default="reswapper_256",
-                       help="Which model to download (default: reswapper_256)")
-    group.add_argument("--all", action="store_true", help="Download all known models")
+    parser.add_argument("--model", choices=list(KNOWN_MODELS), default="reswapper_256",
+                        help="Which model to download (default: reswapper_256)")
     args = parser.parse_args()
 
     os.makedirs(MODELS_DIR, exist_ok=True)
 
-    targets = list(KNOWN_MODELS) if args.all else [args.model]
-    results = [download_model(name) for name in targets]
-
-    if all(results):
-        print("\nModels ready.")
+    if download_model(args.model):
+        print("\nModel ready.")
         print("Run:  python run.py --source <face.jpg> --model models\\reswapper_256.onnx")
-        print("  or  python run.py --source <face.jpg> --model models\\simswap_256.onnx")
     else:
         sys.exit(1)
 
