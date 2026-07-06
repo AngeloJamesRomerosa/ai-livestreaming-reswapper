@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ai-livestreaming-reswapper
+    env: python
+    plan: standard          # 2 GB RAM — needed for InsightFace buffalo_l (~400 MB)
+    pythonVersion: "3.11"
+    buildCommand: bash build.sh
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/status
+
+    envVars:
+      - key: STREAM_SECRET
+        generateValue: true   # Render auto-generates a random secret
+      - key: EXECUTION_PROVIDER
+        value: cpu            # No GPU on Render — browser handles inference
+      - key: MAX_SWAP_FPS
+        value: "5"            # Server-side worker FPS cap (used only for latent extraction)
+      - key: DET_SIZE
+        value: "320"          # Detector input size — 320 is fine for CPU latent extraction
+      - key: DET_THRESH
+        value: "0.5"

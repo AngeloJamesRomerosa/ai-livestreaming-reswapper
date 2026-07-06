@@ -1,0 +1,17 @@
+# Server runtime dependencies
+# Use opencv-python-headless (no display required on Render/Linux)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-dotenv>=1.0.0
+aiofiles>=23.0.0
+numpy>=1.24.0,<2.0.0
+opencv-python-headless>=4.8.0
+insightface>=0.7.3
+onnxruntime>=1.16.3
+Pillow>=10.0.0
+requests>=2.31.0
+tqdm>=4.65.0
+
+# Needed at build time to convert FP32 model → FP16
+onnx>=1.14.0
+onnxconverter-common>=1.13.0
