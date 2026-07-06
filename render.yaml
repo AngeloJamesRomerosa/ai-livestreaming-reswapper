@@ -2,7 +2,7 @@ services:
   - type: web
     name: ai-livestreaming-reswapper
     env: python
-    plan: standard          # 2 GB RAM — needed for InsightFace buffalo_l (~400 MB)
+    plan: free              # 512 MB RAM — fits: FaceDetector (~350 MB) + emap.npy (1 MB), browser runs swap
     pythonVersion: "3.11"
     buildCommand: bash build.sh
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT

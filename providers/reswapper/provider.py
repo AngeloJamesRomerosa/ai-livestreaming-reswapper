@@ -165,6 +165,8 @@ class ReswapperProvider:
         self._detector: Optional[FaceDetector] = None
         self._swapper: Optional[FaceSwapper] = None
         self._worker: Optional[_Worker] = None
+        self._emap: Optional[np.ndarray] = None
+        self._source_normed_embedding: Optional[np.ndarray] = None
         self._metrics_running = False
         self._metrics_thread: Optional[threading.Thread] = None
         self.loaded = False
@@ -218,6 +220,19 @@ class ReswapperProvider:
             _set_state(self.components, "face_detector", "failed", str(e))
             _log(f"Face detector loading failed: {e}", "error")
             raise
+
+        # CPU + emap mode: skip loading the 300 MB swap model entirely.
+        # Browser downloads the model and runs swap inference client-side.
+        emap_path = Path(config.MODEL_PATH).parent / "emap.npy"
+        if name == "cpu" and emap_path.exists():
+            self._emap = np.load(str(emap_path)).astype(np.float32)
+            self.active_provider = "cpu"
+            _set_state(self.components, "swap_model", "ready", "emap.npy (browser runs swap)")
+            _set_state(self.components, "gpu_provider", "warning", "CPU (no GPU — browser inference)")
+            _log("CPU mode: swap model skipped — browser runs inference, emap loaded from emap.npy", "info")
+            self.loaded = True
+            _log("All models ready", "success")
+            return
 
         try:
             _set_state(self.components, "swap_model", "loading", self.model_file)
@@ -287,6 +302,14 @@ class ReswapperProvider:
             _set_state(self.components, "source_face", "failed", str(e))
             _log(f"Source face loading failed: {e}", "error")
             raise
+
+        # CPU / emap-only mode: store embedding, browser handles swap inference.
+        if self._swapper is None:
+            self._source_normed_embedding = source.normed_embedding.copy()
+            _set_state(self.components, "source_face", "ready", fname)
+            _log(f"Source face loaded (latent-only mode): {fname}", "success")
+            return
+
         if self._worker:
             self._worker.stop()
             self._worker.join(timeout=2)
@@ -307,6 +330,13 @@ class ReswapperProvider:
 
     def get_source_latent(self) -> Optional[list]:
         """Returns latent = L2_norm(normed_embedding @ emap) for browser-side inference."""
+        # CPU / emap-only mode
+        if self._emap is not None and self._source_normed_embedding is not None:
+            normed = self._source_normed_embedding.reshape((1, -1))
+            latent = np.dot(normed, self._emap)
+            latent = latent / np.linalg.norm(latent)
+            return latent.tolist()
+        # GPU mode: use emap from the loaded swapper
         if not (self._worker and self._worker._source_face is not None and self._swapper):
             return None
         normed = self._worker._source_face.normed_embedding.reshape((1, -1))

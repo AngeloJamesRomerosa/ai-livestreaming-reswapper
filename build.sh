@@ -17,4 +17,7 @@ echo "=== Converting to FP16 ==="
 python convert_fp16.py
 cd ..
 
+echo "=== Extracting emap (1 MB projection matrix for latent computation) ==="
+python extract_emap.py
+
 echo "=== Build complete ==="
