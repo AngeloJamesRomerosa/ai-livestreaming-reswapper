@@ -13,6 +13,8 @@ from routes.status import router as status_router
 from routes.log import router as log_router, init_loop, emit
 from routes.stream import router as stream_router
 from routes.stream_mjpeg import router as mjpeg_router
+from routes.models import router as models_router
+from routes.relay import router as relay_router
 from providers.reswapper.routes import router as swap_router
 
 app = FastAPI(title="AI Face Swap Server")
@@ -26,7 +28,7 @@ app.add_middleware(
 )
 
 for r in [faces_router, session_router, status_router, log_router,
-          stream_router, mjpeg_router, swap_router]:
+          stream_router, mjpeg_router, models_router, relay_router, swap_router]:
     app.include_router(r)
 
 Path("uploads").mkdir(exist_ok=True)

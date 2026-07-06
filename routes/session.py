@@ -33,7 +33,13 @@ async def session_create(req: CreateReq):
     sess.face_path = req.face_path
     sess.active = True
     emit(f"Session active (sid: {sid[:8]}…)", "success")
-    return {"sid": sid, "provider": provider.active_provider, "stream_secret": config.STREAM_SECRET}
+    source_latent = provider.get_source_latent()
+    return {
+        "sid": sid,
+        "provider": provider.active_provider,
+        "stream_secret": config.STREAM_SECRET,
+        "source_latent": source_latent,
+    }
 
 class CloseReq(BaseModel):
     sid: str

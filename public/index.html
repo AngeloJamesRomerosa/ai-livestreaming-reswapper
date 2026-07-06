@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Face Swap</title>
   <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
 </head>
 <body>
   <div class="layout">
@@ -117,8 +118,8 @@
         <div class="status-row" id="st-swap-ws">
           <span class="status-dot dot-idle"></span>
           <span class="status-info">
-            <span class="status-name">Swap Stream</span>
-            <span class="status-sub">WebSocket</span>
+            <span class="status-name">Inference</span>
+            <span class="status-sub">—</span>
           </span>
           <span class="status-badge">—</span>
         </div>

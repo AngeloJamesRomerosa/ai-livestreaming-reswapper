@@ -1,3 +1,5 @@
+import { InferenceEngine } from './inference-engine.js';
+
 const faceInput        = document.getElementById("faceInput");
 const faceImg          = document.getElementById("faceImg");
 const facePlaceholder  = document.getElementById("facePlaceholder");
@@ -22,30 +24,31 @@ const logBody          = document.getElementById("logBody");
 const logCount         = document.getElementById("logCount");
 const logClear         = document.getElementById("logClear");
 
-let facePath = null;
-let streamSecret = "secret";
-let sid = null;
-let ws = null;
-let mediaStream = null;
-let captureTimer = null;
-let statusTimer = null;
-let metricsTimer = null;
-let captureCanvas = null;
-let captureCtx = null;
-let outCtx = null;
-let framesSent = 0;
-let framesRecv = 0;
-let fpsLastCheck = performance.now();
-
-let lastSendTime = 0;
+const engine       = new InferenceEngine();
+let facePath       = null;
+let streamSecret   = "secret";
+let sid            = null;
+let relayWs        = null;
+let inferRunning   = false;
+let mediaStream    = null;
+let captureTimer   = null;
+let statusTimer    = null;
+let metricsTimer   = null;
+let captureCanvas  = null;
+let captureCtx     = null;
+let outCtx         = null;
+let framesSent     = 0;
+let framesRecv     = 0;
+let fpsLastCheck   = performance.now();
+let lastSendTime   = 0;
 
 // per-20s window
 let windowStart      = 0;
 let windowSentFrames = 0;
 let windowSentBytes  = 0;
 let windowFramesRecv = 0;
-let windowLatencies  = [];
-let windowRenderMs   = [];
+let windowLatencies  = [];   // inference ms per swapped frame
+let windowRenderMs   = [];   // unused (kept for symmetry)
 
 // session totals
 let sessionStart        = 0;
@@ -53,8 +56,6 @@ let sessionSentFrames   = 0;
 let sessionOutputFrames = 0;
 let sessionLatSum       = 0;
 let sessionLatCount     = 0;
-let sessionRenderSum    = 0;
-let sessionRenderCount  = 0;
 
 // ── Activity log (SSE) ────────────────────────────────────────────────────────
 
@@ -123,16 +124,12 @@ function setRow(rowId, status, subText) {
 
 function renderServerStatus(data) {
   const c = data.components || {};
-
   const fd = c.face_detector || {};
   setRow("st-face-detector", fd.status || "idle");
-
   const sm = c.swap_model || {};
   setRow("st-swap-model", sm.status || "idle", sm.detail || "ONNX");
-
   const sf = c.source_face || {};
   setRow("st-source-face", sf.status || "idle", sf.detail || "No face loaded");
-
   const gp = c.gpu_provider || {};
   setRow("st-gpu-provider", gp.status || "idle", gp.detail || "—");
 }
@@ -148,11 +145,6 @@ async function pollStatus() {
 function startStatusPolling() {
   pollStatus();
   statusTimer = setInterval(pollStatus, 2000);
-}
-
-function stopStatusPolling() {
-  clearInterval(statusTimer);
-  statusTimer = null;
 }
 
 startStatusPolling();
@@ -203,7 +195,7 @@ async function startSession() {
   startBtn.disabled = true;
   resPreset.disabled = true;
   fpsPreset.disabled = true;
-  sessionStatus.textContent = "Loading models… (first run may take ~30s)";
+  sessionStatus.textContent = "Connecting to server…";
   try {
     const res = await fetch("/api/session/create", {
       method: "POST",
@@ -215,8 +207,23 @@ async function startSession() {
     sid = data.sid;
     streamSecret = data.stream_secret || streamSecret;
     faceRemoveBtn.disabled = true;
+    engine.setSourceLatent(data.source_latent);
 
     await pollStatus();
+
+    // Download and initialize browser ONNX models
+    appendLog("info", localTs(), "Loading browser models…");
+    let lastStage = null;
+    await engine.loadModels(({ stage, label, progress }) => {
+      const pct = Math.round(progress * 100);
+      sessionStatus.textContent = `${label} ${pct}%`;
+      if (stage !== lastStage) {
+        lastStage = stage;
+        appendLog("info", localTs(), label);
+      }
+    });
+    appendLog("success", localTs(),
+      `Models ready — det:${engine.detEp}  swap:${engine.swapEp}`);
 
     sessionStatus.textContent = "Session active";
     startBtn.hidden = true;
@@ -231,7 +238,8 @@ async function startSession() {
     copyViewer.onclick = () => navigator.clipboard.writeText(viewer);
 
     await startWebcam();
-    openSwapSocket();
+    openRelaySocket();
+    startLocalInference();
   } catch (e) {
     sessionStatus.textContent = `Error: ${e.message}`;
     startBtn.disabled = false;
@@ -264,21 +272,23 @@ async function stopSession() {
   mFps.textContent = "—";
   mSent.textContent = "—";
   setRow("st-webcam", "idle", "—");
-  setRow("st-swap-ws", "idle");
+  setRow("st-swap-ws", "idle", "—");
   await pollStatus();
 }
 
 function cleanup() {
-  clearInterval(captureTimer);
+  inferRunning = false;
+  clearTimeout(captureTimer);
   captureTimer = null;
   clearInterval(metricsTimer);
   metricsTimer = null;
-  if (ws) { ws.close(); ws = null; }
+  if (relayWs) { relayWs.close(); relayWs = null; }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   inputVideo.srcObject = null;
-  framesSent = 0;
-  framesRecv = 0;
+  framesSent   = 0;
+  framesRecv   = 0;
   lastSendTime = 0;
+  engine.resetCache();
 }
 
 // ── Webcam ────────────────────────────────────────────────────────────────────
@@ -307,93 +317,98 @@ async function startWebcam() {
   setRow("st-webcam", "active", `${w}×${h} @ ${fpsLabel}`);
 
   captureCanvas = document.createElement("canvas");
-  captureCanvas.width = w;
+  captureCanvas.width  = w;
   captureCanvas.height = h;
   captureCtx = captureCanvas.getContext("2d");
 
-  outputCanvas.width = w;
+  outputCanvas.width  = w;
   outputCanvas.height = h;
   outCtx = outputCanvas.getContext("2d");
 }
 
-// ── WebSocket swap ────────────────────────────────────────────────────────────
+// ── Local inference loop ──────────────────────────────────────────────────────
 
-function openSwapSocket() {
+function openRelaySocket() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws/swap?sid=${sid}`);
-  ws.binaryType = "arraybuffer";
+  relayWs = new WebSocket(`${proto}://${location.host}/ws/relay?sid=${sid}`);
+  relayWs.binaryType = "arraybuffer";
+  relayWs.onclose = () => { relayWs = null; };
+}
 
-  ws.onopen = () => {
-    sessionStart        = performance.now();
-    windowStart         = performance.now();
-    windowSentFrames    = 0;
-    windowSentBytes     = 0;
-    windowFramesRecv    = 0;
-    windowLatencies     = [];
-    windowRenderMs      = [];
-    sessionSentFrames   = 0;
-    sessionOutputFrames = 0;
-    sessionLatSum       = 0;
-    sessionLatCount     = 0;
-    sessionRenderSum    = 0;
-    sessionRenderCount  = 0;
-    setRow("st-swap-ws", "active");
-    captureTimer = setInterval(sendFrame, getSendInterval());
-    metricsTimer = setInterval(logPeriodicMetrics, 20000);
-    const resLabel = resPreset.options[resPreset.selectedIndex].text;
-    const fpsTxt   = fpsPreset.options[fpsPreset.selectedIndex].text;
-    appendLog("info", localTs(), `Stream started — ${resLabel} | ${fpsTxt}`);
-  };
+function startLocalInference() {
+  inferRunning = true;
+  engine.resetCache();
 
-  ws.onmessage = (e) => {
-    const recvTime = performance.now();
+  sessionStart        = performance.now();
+  windowStart         = performance.now();
+  windowSentFrames    = 0;
+  windowSentBytes     = 0;
+  windowFramesRecv    = 0;
+  windowLatencies     = [];
+  windowRenderMs      = [];
+  sessionSentFrames   = 0;
+  sessionOutputFrames = 0;
+  sessionLatSum       = 0;
+  sessionLatCount     = 0;
+
+  setRow("st-swap-ws", "active", engine.swapEp);
+  metricsTimer = setInterval(logPeriodicMetrics, 20000);
+
+  const resLabel = resPreset.options[resPreset.selectedIndex].text;
+  const fpsTxt   = fpsPreset.options[fpsPreset.selectedIndex].text;
+  appendLog("info", localTs(), `Inference started — ${resLabel} | ${fpsTxt}`);
+
+  inferLoop();
+}
+
+async function inferLoop() {
+  if (!inferRunning || !captureCtx) {
+    if (inferRunning) captureTimer = setTimeout(inferLoop, 16);
+    return;
+  }
+
+  const t0 = performance.now();
+
+  captureCtx.drawImage(inputVideo, 0, 0, captureCanvas.width, captureCanvas.height);
+  const bitmap = await createImageBitmap(captureCanvas);
+
+  windowSentFrames++;
+  sessionSentFrames++;
+  framesSent++;
+  lastSendTime = t0;
+
+  const result = await engine.runFrame(bitmap, captureCanvas.width, captureCanvas.height);
+  bitmap.close();
+
+  const inferMs = performance.now() - t0;
+
+  if (result) {
+    outCtx.drawImage(result, 0, 0, outputCanvas.width, outputCanvas.height);
+
+    // Push swapped frame to server relay so OBS viewer.html and MJPEG still work
+    if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+      result.convertToBlob({ type: "image/jpeg", quality: 0.85 }).then(blob =>
+        blob.arrayBuffer().then(buf => {
+          windowSentBytes += buf.byteLength;
+          relayWs?.send(buf);
+        })
+      );
+    }
+
     framesRecv++;
     windowFramesRecv++;
     sessionOutputFrames++;
-    if (lastSendTime > 0) {
-      const lat = recvTime - lastSendTime;
-      windowLatencies.push(lat);
-      sessionLatSum   += lat;
-      sessionLatCount++;
-    }
-    const blob = new Blob([e.data], { type: "image/jpeg" });
-    const renderStart = performance.now();
-    createImageBitmap(blob).then(bitmap => {
-      outCtx.drawImage(bitmap, 0, 0, outputCanvas.width, outputCanvas.height);
-      const renderMs = performance.now() - renderStart;
-      windowRenderMs.push(renderMs);
-      sessionRenderSum   += renderMs;
-      sessionRenderCount++;
-      bitmap.close();
-      tickMetrics();
-    });
-  };
+    windowLatencies.push(inferMs);
+    sessionLatSum   += inferMs;
+    sessionLatCount++;
 
-  ws.onerror = () => {
-    setRow("st-swap-ws", "failed");
-    sessionStatus.textContent = "Connection error";
-  };
-  ws.onclose = () => {
-    setRow("st-swap-ws", "idle");
-    clearInterval(captureTimer);
-    captureTimer = null;
-  };
-}
+    tickMetrics();
+  }
 
-function sendFrame() {
-  if (!ws || ws.readyState !== WebSocket.OPEN || !captureCtx) return;
-  captureCtx.drawImage(inputVideo, 0, 0, captureCanvas.width, captureCanvas.height);
-  captureCanvas.toBlob(blob => {
-    if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
-    blob.arrayBuffer().then(buf => {
-      windowSentFrames++;
-      windowSentBytes += buf.byteLength;
-      sessionSentFrames++;
-      lastSendTime = performance.now();
-      ws.send(buf);
-      framesSent++;
-    });
-  }, "image/jpeg", 0.85);
+  const elapsed = performance.now() - t0;
+  if (inferRunning) {
+    captureTimer = setTimeout(inferLoop, Math.max(0, getSendInterval() - elapsed));
+  }
 }
 
 // ── Metrics ───────────────────────────────────────────────────────────────────
@@ -415,13 +430,11 @@ function avgMs(arr) {
 
 function logPeriodicMetrics() {
   const elapsed    = (performance.now() - windowStart) / 1000;
-  const sendFps    = elapsed > 0 ? (windowSentFrames / elapsed).toFixed(1) : "0.0";
-  const kbps       = elapsed > 0 ? ((windowSentBytes / 1024) / elapsed).toFixed(0) : "0";
-  const recvFps    = elapsed > 0 ? (windowFramesRecv / elapsed).toFixed(1) : "0.0";
-  const avgLat     = avgMs(windowLatencies);
-  const avgRender  = avgMs(windowRenderMs);
+  const captureFps = elapsed > 0 ? (windowSentFrames / elapsed).toFixed(1) : "0.0";
+  const outputFps  = elapsed > 0 ? (windowFramesRecv / elapsed).toFixed(1) : "0.0";
+  const avgInfer   = avgMs(windowLatencies);
   appendLog("info", localTs(),
-    `[Browser]  Send: ${sendFps} fps (${kbps} KB/s)  →  Output: ${recvFps} fps  |  RTT: ${avgLat} ms  |  Render: ${avgRender} ms`);
+    `[Browser]  Capture: ${captureFps} fps  →  Output: ${outputFps} fps  |  Infer: ${avgInfer} ms`);
   windowStart      = performance.now();
   windowSentFrames = 0;
   windowSentBytes  = 0;
@@ -433,11 +446,10 @@ function logPeriodicMetrics() {
 function logSessionSummary() {
   if (sessionStart === 0) return;
   const elapsed    = (performance.now() - sessionStart) / 1000;
-  const avgSend    = elapsed > 0 ? (sessionSentFrames   / elapsed).toFixed(1) : "0.0";
-  const avgRecv    = elapsed > 0 ? (sessionOutputFrames / elapsed).toFixed(1) : "0.0";
-  const avgLat     = sessionLatCount    > 0 ? Math.round(sessionLatSum    / sessionLatCount)    : 0;
-  const avgRender  = sessionRenderCount > 0 ? Math.round(sessionRenderSum / sessionRenderCount) : 0;
+  const avgCapture = elapsed > 0 ? (sessionSentFrames   / elapsed).toFixed(1) : "0.0";
+  const avgOutput  = elapsed > 0 ? (sessionOutputFrames / elapsed).toFixed(1) : "0.0";
+  const avgInfer   = sessionLatCount > 0 ? Math.round(sessionLatSum / sessionLatCount) : 0;
   appendLog("info", localTs(),
-    `[Session]  Send avg: ${avgSend} fps  →  Output avg: ${avgRecv} fps  |  Avg RTT: ${avgLat} ms  |  Avg Render: ${avgRender} ms  |  Duration: ${elapsed.toFixed(0)}s`);
+    `[Session]  Capture avg: ${avgCapture} fps  →  Output avg: ${avgOutput} fps  |  Avg Infer: ${avgInfer} ms  |  Duration: ${elapsed.toFixed(0)}s`);
   sessionStart = 0;
 }

@@ -305,6 +305,16 @@ class ReswapperProvider:
         _set_state(self.components, "source_face", "ready", fname)
         _log(f"Source face loaded successfully: {fname}", "success")
 
+    def get_source_latent(self) -> Optional[list]:
+        """Returns latent = L2_norm(normed_embedding @ emap) for browser-side inference."""
+        if not (self._worker and self._worker._source_face is not None and self._swapper):
+            return None
+        normed = self._worker._source_face.normed_embedding.reshape((1, -1))
+        emap = self._swapper._model.emap
+        latent = np.dot(normed, emap)
+        latent = latent / np.linalg.norm(latent)
+        return latent.tolist()
+
     def submit_frame(self, frame: np.ndarray):
         if self._worker:
             self._worker.submit(frame)
