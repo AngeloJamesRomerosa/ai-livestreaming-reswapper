@@ -69,6 +69,7 @@ class FaceSwapper:
         print("done.")
 
         self._model = INSwapper(model_file=model_path, session=session)
+        self.session = session
 
     def swap(self, frame_bgr, target_face, source_face):
         """Return a copy of frame_bgr with target_face replaced by source_face."""

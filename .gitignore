@@ -24,3 +24,7 @@ Thumbs.db
 
 # Local config
 .claude/
+.env
+
+# Uploaded face images
+uploads/
