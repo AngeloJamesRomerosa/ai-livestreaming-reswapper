@@ -73,10 +73,21 @@ class _Worker(threading.Thread):
         self._running = True
         self._frame_count = 0
         self._cached_faces = []
+        # per-window stats (reset on each get_stats() call)
+        self._st_lock       = threading.Lock()
+        self._st_submitted  = 0
+        self._st_processed  = 0
+        self._st_det_ms     = 0.0
+        self._st_det_n      = 0
+        self._st_swap_ms    = 0.0
+        self._st_swap_n     = 0
+        self._st_window     = time.perf_counter()
 
     def submit(self, frame: np.ndarray):
         with self._in_lock:
             self._in_frame = frame
+        with self._st_lock:
+            self._st_submitted += 1
         self._wakeup.set()
 
     def latest(self) -> Tuple[int, Optional[np.ndarray]]:
@@ -86,6 +97,28 @@ class _Worker(threading.Thread):
     def stop(self):
         self._running = False
         self._wakeup.set()
+
+    def get_stats(self) -> dict:
+        with self._st_lock:
+            elapsed  = time.perf_counter() - self._st_window
+            proc     = self._st_processed
+            sub      = self._st_submitted
+            det_avg  = (self._st_det_ms  / self._st_det_n  * 1000) if self._st_det_n  > 0 else 0.0
+            swap_avg = (self._st_swap_ms / self._st_swap_n * 1000) if self._st_swap_n > 0 else 0.0
+            stats = {
+                "worker_fps": proc / elapsed if elapsed > 0 else 0.0,
+                "dropped":    sub - proc,
+                "det_avg_ms": det_avg,
+                "swap_avg_ms": swap_avg,
+            }
+            self._st_submitted = 0
+            self._st_processed = 0
+            self._st_det_ms    = 0.0
+            self._st_det_n     = 0
+            self._st_swap_ms   = 0.0
+            self._st_swap_n    = 0
+            self._st_window    = time.perf_counter()
+            return stats
 
     def run(self):
         last_frame = None
@@ -105,11 +138,23 @@ class _Worker(threading.Thread):
             last_time = time.perf_counter()
             self._frame_count += 1
             if self._frame_count % self._det_skip == 1 or not self._cached_faces:
+                t0 = time.perf_counter()
                 self._cached_faces = self._detector.detect(frame)
+                det_ms = time.perf_counter() - t0
+                with self._st_lock:
+                    self._st_det_ms += det_ms
+                    self._st_det_n  += 1
             if self._cached_faces:
+                t0 = time.perf_counter()
                 result = self._swapper.swap(frame, self._cached_faces[0], self._source_face)
+                swap_ms = time.perf_counter() - t0
+                with self._st_lock:
+                    self._st_swap_ms += swap_ms
+                    self._st_swap_n  += 1
             else:
                 result = frame
+            with self._st_lock:
+                self._st_processed += 1
             with self._out_lock:
                 self._out_frame = result
                 self._out_seq += 1
@@ -120,6 +165,8 @@ class ReswapperProvider:
         self._detector: Optional[FaceDetector] = None
         self._swapper: Optional[FaceSwapper] = None
         self._worker: Optional[_Worker] = None
+        self._metrics_running = False
+        self._metrics_thread: Optional[threading.Thread] = None
         self.loaded = False
         self.active_provider = "cpu"
         self.model_file = ""
@@ -129,6 +176,23 @@ class ReswapperProvider:
             "gpu_provider":  {"status": "idle", "detail": "—"},
             "source_face":   {"status": "idle", "detail": "No face loaded"},
         }
+
+    def _metrics_loop(self):
+        while self._metrics_running:
+            for _ in range(200):          # 200 × 0.1s = 20s, interruptible
+                if not self._metrics_running:
+                    return
+                time.sleep(0.1)
+            if not self._worker:
+                continue
+            s = self._worker.get_stats()
+            _log(
+                f"[Server]   Worker: {s['worker_fps']:.1f} fps  |  "
+                f"Detect: {s['det_avg_ms']:.0f} ms  |  "
+                f"Swap: {s['swap_avg_ms']:.0f} ms  |  "
+                f"Dropped: {s['dropped']}",
+                "info",
+            )
 
     def load(self):
         name = config.EXECUTION_PROVIDER
@@ -211,7 +275,9 @@ class ReswapperProvider:
         self.loaded = True
         _log("All models ready", "success")
 
-    def set_source_face(self, image_path: str):
+    def set_source_face(self, image_path: str, max_fps: Optional[int] = None):
+        if max_fps is None:
+            max_fps = config.MAX_SWAP_FPS
         fname = Path(image_path).name
         _set_state(self.components, "source_face", "loading", fname)
         _log(f"Loading source face: {fname}…")
@@ -224,11 +290,18 @@ class ReswapperProvider:
         if self._worker:
             self._worker.stop()
             self._worker.join(timeout=2)
+        fps_label = "uncapped" if max_fps == 0 else f"{max_fps} fps"
+        _log(f"Starting inference worker — FPS cap: {fps_label}")
         self._worker = _Worker(
             self._detector, self._swapper, source,
-            det_skip=4, max_fps=config.MAX_SWAP_FPS,
+            det_skip=4, max_fps=max_fps,
         )
         self._worker.start()
+        self._metrics_running = True
+        self._metrics_thread = threading.Thread(
+            target=self._metrics_loop, daemon=True, name="metrics"
+        )
+        self._metrics_thread.start()
         _set_state(self.components, "source_face", "ready", fname)
         _log(f"Source face loaded successfully: {fname}", "success")
 
@@ -242,6 +315,10 @@ class ReswapperProvider:
         return -1, None
 
     def stop(self):
+        self._metrics_running = False
+        if self._metrics_thread:
+            self._metrics_thread.join(timeout=1)
+            self._metrics_thread = None
         if self._worker:
             self._worker.stop()
             self._worker.join(timeout=2)

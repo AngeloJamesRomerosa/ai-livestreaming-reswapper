@@ -29,12 +29,32 @@ let ws = null;
 let mediaStream = null;
 let captureTimer = null;
 let statusTimer = null;
+let metricsTimer = null;
 let captureCanvas = null;
 let captureCtx = null;
 let outCtx = null;
 let framesSent = 0;
 let framesRecv = 0;
 let fpsLastCheck = performance.now();
+
+let lastSendTime = 0;
+
+// per-20s window
+let windowStart      = 0;
+let windowSentFrames = 0;
+let windowSentBytes  = 0;
+let windowFramesRecv = 0;
+let windowLatencies  = [];
+let windowRenderMs   = [];
+
+// session totals
+let sessionStart        = 0;
+let sessionSentFrames   = 0;
+let sessionOutputFrames = 0;
+let sessionLatSum       = 0;
+let sessionLatCount     = 0;
+let sessionRenderSum    = 0;
+let sessionRenderCount  = 0;
 
 // ── Activity log (SSE) ────────────────────────────────────────────────────────
 
@@ -70,6 +90,18 @@ logClear.addEventListener("click", () => {
   };
   es.onerror = () => { setTimeout(connectLog, 3000); es.close(); };
 })();
+
+function localTs() {
+  return new Date().toTimeString().slice(0, 8);
+}
+
+resPreset.addEventListener("change", () => {
+  appendLog("info", localTs(), `Resolution set to ${resPreset.options[resPreset.selectedIndex].text}`);
+});
+
+fpsPreset.addEventListener("change", () => {
+  appendLog("info", localTs(), `Frame rate set to ${fpsPreset.options[fpsPreset.selectedIndex].text}`);
+});
 
 // ── Status panel ──────────────────────────────────────────────────────────────
 
@@ -176,7 +208,7 @@ async function startSession() {
     const res = await fetch("/api/session/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ face_path: facePath }),
+      body: JSON.stringify({ face_path: facePath, max_swap_fps: parseInt(fpsPreset.value, 10) }),
     });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
@@ -211,6 +243,7 @@ async function startSession() {
 }
 
 async function stopSession() {
+  logSessionSummary();
   cleanup();
   if (sid) {
     await fetch("/api/session/close", {
@@ -238,11 +271,14 @@ async function stopSession() {
 function cleanup() {
   clearInterval(captureTimer);
   captureTimer = null;
+  clearInterval(metricsTimer);
+  metricsTimer = null;
   if (ws) { ws.close(); ws = null; }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   inputVideo.srcObject = null;
   framesSent = 0;
   framesRecv = 0;
+  lastSendTime = 0;
 }
 
 // ── Webcam ────────────────────────────────────────────────────────────────────
@@ -253,7 +289,8 @@ function getResConstraints() {
 }
 
 function getSendInterval() {
-  return 1000 / parseInt(fpsPreset.value, 10);
+  const fps = parseInt(fpsPreset.value, 10);
+  return fps === 0 ? 16 : 1000 / fps;
 }
 
 async function startWebcam() {
@@ -266,7 +303,8 @@ async function startWebcam() {
 
   const w = inputVideo.videoWidth;
   const h = inputVideo.videoHeight;
-  setRow("st-webcam", "active", `${w}×${h} @ ${fpsPreset.value}fps`);
+  const fpsLabel = fpsPreset.value === "0" ? "MAX fps" : `${fpsPreset.value} fps`;
+  setRow("st-webcam", "active", `${w}×${h} @ ${fpsLabel}`);
 
   captureCanvas = document.createElement("canvas");
   captureCanvas.width = w;
@@ -286,15 +324,46 @@ function openSwapSocket() {
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
+    sessionStart        = performance.now();
+    windowStart         = performance.now();
+    windowSentFrames    = 0;
+    windowSentBytes     = 0;
+    windowFramesRecv    = 0;
+    windowLatencies     = [];
+    windowRenderMs      = [];
+    sessionSentFrames   = 0;
+    sessionOutputFrames = 0;
+    sessionLatSum       = 0;
+    sessionLatCount     = 0;
+    sessionRenderSum    = 0;
+    sessionRenderCount  = 0;
     setRow("st-swap-ws", "active");
     captureTimer = setInterval(sendFrame, getSendInterval());
+    metricsTimer = setInterval(logPeriodicMetrics, 20000);
+    const resLabel = resPreset.options[resPreset.selectedIndex].text;
+    const fpsTxt   = fpsPreset.options[fpsPreset.selectedIndex].text;
+    appendLog("info", localTs(), `Stream started — ${resLabel} | ${fpsTxt}`);
   };
 
   ws.onmessage = (e) => {
+    const recvTime = performance.now();
     framesRecv++;
+    windowFramesRecv++;
+    sessionOutputFrames++;
+    if (lastSendTime > 0) {
+      const lat = recvTime - lastSendTime;
+      windowLatencies.push(lat);
+      sessionLatSum   += lat;
+      sessionLatCount++;
+    }
     const blob = new Blob([e.data], { type: "image/jpeg" });
+    const renderStart = performance.now();
     createImageBitmap(blob).then(bitmap => {
       outCtx.drawImage(bitmap, 0, 0, outputCanvas.width, outputCanvas.height);
+      const renderMs = performance.now() - renderStart;
+      windowRenderMs.push(renderMs);
+      sessionRenderSum   += renderMs;
+      sessionRenderCount++;
       bitmap.close();
       tickMetrics();
     });
@@ -316,7 +385,14 @@ function sendFrame() {
   captureCtx.drawImage(inputVideo, 0, 0, captureCanvas.width, captureCanvas.height);
   captureCanvas.toBlob(blob => {
     if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
-    blob.arrayBuffer().then(buf => { ws.send(buf); framesSent++; });
+    blob.arrayBuffer().then(buf => {
+      windowSentFrames++;
+      windowSentBytes += buf.byteLength;
+      sessionSentFrames++;
+      lastSendTime = performance.now();
+      ws.send(buf);
+      framesSent++;
+    });
   }, "image/jpeg", 0.85);
 }
 
@@ -331,4 +407,37 @@ function tickMetrics() {
     fpsLastCheck = now;
   }
   mSent.textContent = framesSent;
+}
+
+function avgMs(arr) {
+  return arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+}
+
+function logPeriodicMetrics() {
+  const elapsed    = (performance.now() - windowStart) / 1000;
+  const sendFps    = elapsed > 0 ? (windowSentFrames / elapsed).toFixed(1) : "0.0";
+  const kbps       = elapsed > 0 ? ((windowSentBytes / 1024) / elapsed).toFixed(0) : "0";
+  const recvFps    = elapsed > 0 ? (windowFramesRecv / elapsed).toFixed(1) : "0.0";
+  const avgLat     = avgMs(windowLatencies);
+  const avgRender  = avgMs(windowRenderMs);
+  appendLog("info", localTs(),
+    `[Browser]  Send: ${sendFps} fps (${kbps} KB/s)  →  Output: ${recvFps} fps  |  RTT: ${avgLat} ms  |  Render: ${avgRender} ms`);
+  windowStart      = performance.now();
+  windowSentFrames = 0;
+  windowSentBytes  = 0;
+  windowFramesRecv = 0;
+  windowLatencies  = [];
+  windowRenderMs   = [];
+}
+
+function logSessionSummary() {
+  if (sessionStart === 0) return;
+  const elapsed    = (performance.now() - sessionStart) / 1000;
+  const avgSend    = elapsed > 0 ? (sessionSentFrames   / elapsed).toFixed(1) : "0.0";
+  const avgRecv    = elapsed > 0 ? (sessionOutputFrames / elapsed).toFixed(1) : "0.0";
+  const avgLat     = sessionLatCount    > 0 ? Math.round(sessionLatSum    / sessionLatCount)    : 0;
+  const avgRender  = sessionRenderCount > 0 ? Math.round(sessionRenderSum / sessionRenderCount) : 0;
+  appendLog("info", localTs(),
+    `[Session]  Send avg: ${avgSend} fps  →  Output avg: ${avgRecv} fps  |  Avg RTT: ${avgLat} ms  |  Avg Render: ${avgRender} ms  |  Duration: ${elapsed.toFixed(0)}s`);
+  sessionStart = 0;
 }

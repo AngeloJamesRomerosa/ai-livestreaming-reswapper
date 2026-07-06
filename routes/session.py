@@ -12,6 +12,7 @@ router = APIRouter()
 class CreateReq(BaseModel):
     face_path: str
     sid: Optional[str] = None
+    max_swap_fps: Optional[int] = None
 
 @router.post("/api/session/create")
 async def session_create(req: CreateReq):
@@ -22,8 +23,9 @@ async def session_create(req: CreateReq):
     if not provider.loaded:
         emit("First run — loading models (this may take ~30s)…")
         provider.load()
+    fps_cap = req.max_swap_fps if req.max_swap_fps is not None else config.MAX_SWAP_FPS
     try:
-        provider.set_source_face(req.face_path)
+        provider.set_source_face(req.face_path, max_fps=fps_cap)
     except Exception as e:
         state.remove(sid)
         emit(f"Session failed: {e}", "error")
