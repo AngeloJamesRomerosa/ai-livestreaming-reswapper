@@ -21,3 +21,10 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Local config
+.claude/
+.env
+
+# Uploaded face images
+uploads/

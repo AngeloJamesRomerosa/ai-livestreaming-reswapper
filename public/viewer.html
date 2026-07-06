@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stream Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; display: flex; align-items: center; justify-content: center; height: 100vh; }
+    canvas { max-width: 100%; max-height: 100vh; }
+    #status { color: #555; font-family: sans-serif; font-size: 13px; position: absolute; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <p id="status">Connecting…</p>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const sid    = params.get("sid") || "";
+    const canvas = document.getElementById("c");
+    const ctx    = canvas.getContext("2d");
+    const status = document.getElementById("status");
+
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/stream-in?sid=${sid}`);
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen  = () => { status.hidden = true; };
+    ws.onclose = () => { status.hidden = false; status.textContent = "Disconnected — reload to reconnect"; };
+
+    ws.onmessage = async (e) => {
+      const img = await createImageBitmap(new Blob([e.data], { type: "image/jpeg" }));
+      canvas.width  = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      img.close();
+    };
+  </script>
+</body>
+</html>

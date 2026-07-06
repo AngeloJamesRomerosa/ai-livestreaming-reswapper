@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Face Swap</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="layout">
+
+    <aside class="sidebar">
+      <h2>AI Face Swap</h2>
+
+      <section class="card">
+        <h3>Source Face</h3>
+        <div class="face-preview" id="facePreview">
+          <img id="faceImg" src="" alt="" hidden>
+          <span id="facePlaceholder">No image selected</span>
+        </div>
+        <label class="btn btn-outline" for="faceInput" id="faceChooseLabel">Choose Image</label>
+        <input type="file" id="faceInput" accept="image/*" hidden>
+        <button id="faceRemoveBtn" class="btn btn-outline btn-sm" hidden>Remove Face</button>
+        <p id="faceStatus" class="status-text"></p>
+      </section>
+
+      <section class="card">
+        <h3>Stream Settings</h3>
+        <div class="setting-row">
+          <label class="setting-label" for="resPreset">Resolution</label>
+          <select id="resPreset" class="select">
+            <option value="1920x1080">1080p — 1920×1080</option>
+            <option value="1280x720" selected>720p — 1280×720</option>
+            <option value="848x480">480p — 848×480</option>
+            <option value="640x360">360p — 640×360</option>
+            <option value="424x240">240p — 424×240</option>
+            <option value="256x144">144p — 256×144</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label class="setting-label" for="fpsPreset">Frame Rate</label>
+          <select id="fpsPreset" class="select">
+            <option value="15">15 fps</option>
+            <option value="25">25 fps</option>
+            <option value="30" selected>30 fps</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Session</h3>
+        <button id="startBtn" class="btn btn-primary" disabled>Start</button>
+        <button id="stopBtn" class="btn btn-danger" hidden>Stop</button>
+        <p id="sessionStatus" class="status-text"></p>
+      </section>
+
+      <section class="card" id="obsCard" hidden>
+        <h3>OBS Stream</h3>
+        <p class="label">MJPEG URL (Media Source):</p>
+        <code id="mjpegUrl" class="url-display"></code>
+        <button id="copyMjpeg" class="btn btn-outline btn-sm">Copy URL</button>
+        <p class="label" style="margin-top:4px">Viewer page (Browser Source):</p>
+        <code id="viewerUrl" class="url-display"></code>
+        <button id="copyViewer" class="btn btn-outline btn-sm">Copy URL</button>
+      </section>
+
+      <section class="card status-card">
+        <h3>Status</h3>
+
+        <p class="status-section-label">AI MODELS</p>
+        <div class="status-row" id="st-face-detector">
+          <span class="status-dot dot-idle"></span>
+          <span class="status-info">
+            <span class="status-name">Face Detector</span>
+            <span class="status-sub">InsightFace buffalo_l</span>
+          </span>
+          <span class="status-badge">—</span>
+        </div>
+        <div class="status-row" id="st-swap-model">
+          <span class="status-dot dot-idle"></span>
+          <span class="status-info">
+            <span class="status-name">Swap Model</span>
+            <span class="status-sub" id="st-swap-model-sub">ONNX</span>
+          </span>
+          <span class="status-badge">—</span>
+        </div>
+        <div class="status-row" id="st-source-face">
+          <span class="status-dot dot-idle"></span>
+          <span class="status-info">
+            <span class="status-name">Source Face</span>
+            <span class="status-sub" id="st-source-face-sub">No face loaded</span>
+          </span>
+          <span class="status-badge">—</span>
+        </div>
+
+        <p class="status-section-label" style="margin-top:8px">HARDWARE &amp; STREAM</p>
+        <div class="status-row" id="st-gpu-provider">
+          <span class="status-dot dot-idle"></span>
+          <span class="status-info">
+            <span class="status-name">GPU Provider</span>
+            <span class="status-sub" id="st-gpu-sub">—</span>
+          </span>
+          <span class="status-badge">—</span>
+        </div>
+        <div class="status-row" id="st-webcam">
+          <span class="status-dot dot-idle"></span>
+          <span class="status-info">
+            <span class="status-name">Webcam</span>
+            <span class="status-sub" id="st-webcam-sub">—</span>
+          </span>
+          <span class="status-badge">—</span>
+        </div>
+        <div class="status-row" id="st-swap-ws">
+          <span class="status-dot dot-idle"></span>
+          <span class="status-info">
+            <span class="status-name">Swap Stream</span>
+            <span class="status-sub">WebSocket</span>
+          </span>
+          <span class="status-badge">—</span>
+        </div>
+
+        <p class="status-section-label" style="margin-top:8px">METRICS</p>
+        <div class="metric"><span>Output FPS</span><span id="mFps">—</span></div>
+        <div class="metric"><span>Frames sent</span><span id="mSent">—</span></div>
+      </section>
+    </aside>
+
+    <main class="feeds">
+      <div class="feed-card">
+        <div class="feed-label">Input — Webcam</div>
+        <video id="inputVideo" autoplay muted playsinline></video>
+      </div>
+      <div class="feed-card">
+        <div class="feed-label">Output — Face Swapped</div>
+        <canvas id="outputCanvas"></canvas>
+      </div>
+    </main>
+
+    <section class="log-panel">
+      <div class="log-header">
+        <span class="log-title">Activity Log</span>
+        <span id="logCount" class="log-count">0</span>
+        <button id="logClear" class="log-clear">Clear</button>
+      </div>
+      <div id="logBody" class="log-body"></div>
+    </section>
+
+  </div>
+
+  <script type="module" src="/js/session.js"></script>
+</body>
+</html>
