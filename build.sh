@@ -23,10 +23,13 @@ python extract_emap.py
 echo "=== Pre-downloading InsightFace buffalo_l into project directory ==="
 export INSIGHTFACE_HOME="$(pwd)/.insightface_home"
 python -c "
+import os
 from insightface.app import FaceAnalysis
-app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+root = os.environ.get('INSIGHTFACE_HOME', os.path.expanduser('~/.insightface'))
+print('Downloading to:', root)
+app = FaceAnalysis(name='buffalo_l', root=root, providers=['CPUExecutionProvider'])
 app.prepare(ctx_id=0)
-print('buffalo_l ready')
+print('buffalo_l ready at', root)
 "
 
 echo "=== Build complete ==="

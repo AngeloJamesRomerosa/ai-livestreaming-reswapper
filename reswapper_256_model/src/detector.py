@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
@@ -42,8 +43,12 @@ class FaceDetector:
         # needs: det_10g (bounding box + 5 keypoints) and w600k_r50 (face embedding).
         # The other three — 1k3d68 (3D landmarks), 2d106det (2D landmarks), genderage —
         # run per detected face but are unused by INSwapper, so skipping them is free speedup.
+        _root = os.environ.get(
+            'INSIGHTFACE_HOME', os.path.expanduser('~/.insightface')
+        )
         self._app = FaceAnalysis(
             name='buffalo_l',
+            root=_root,
             providers=upgraded,
             allowed_modules=['detection', 'recognition'],
         )
