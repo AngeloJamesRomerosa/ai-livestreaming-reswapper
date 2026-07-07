@@ -1,3 +1,4 @@
+import gc
 import sys
 import threading
 import time
@@ -303,9 +304,11 @@ class ReswapperProvider:
             _log(f"Source face loading failed: {e}", "error")
             raise
 
-        # CPU / emap-only mode: store embedding, browser handles swap inference.
+        # CPU / emap-only mode: store embedding then unload detector to free ~165 MB.
         if self._swapper is None:
             self._source_normed_embedding = source.normed_embedding.copy()
+            self._detector = None
+            gc.collect()
             _set_state(self.components, "source_face", "ready", fname)
             _log(f"Source face loaded (latent-only mode): {fname}", "success")
             return

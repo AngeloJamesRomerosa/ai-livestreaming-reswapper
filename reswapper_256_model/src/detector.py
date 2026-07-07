@@ -54,14 +54,6 @@ class FaceDetector:
         )
         self._app.prepare(ctx_id=ctx_id, det_size=det_size)
 
-        # Warm up detection + recognition CUDA kernels with a blank frame.
-        # This moves cuDNN compilation to startup rather than the first live frame.
-        print("[warm-up] Compiling detector kernels...", end=" ", flush=True)
-        _dummy = np.zeros((det_size[1], det_size[0], 3), dtype=np.uint8)
-        for _ in range(3):
-            self._app.get(_dummy)
-        print("done.")
-
     def detect(self, frame_bgr):
         """Return faces sorted largest-first, filtered by detection score."""
         faces = self._app.get(frame_bgr)

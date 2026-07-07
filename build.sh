@@ -32,4 +32,17 @@ app.prepare(ctx_id=0)
 print('buffalo_l ready at', root)
 "
 
+echo "=== Converting w600k_r50 to FP16 to halve RAM usage (330 MB -> 165 MB) ==="
+python -c "
+import os, onnx
+from onnxconverter_common import convert_float_to_float16
+root = os.environ.get('INSIGHTFACE_HOME', os.path.expanduser('~/.insightface'))
+path = os.path.join(root, 'models/buffalo_l/w600k_r50.onnx')
+print(f'Converting {path} ...')
+model = onnx.load(path)
+model_fp16 = convert_float_to_float16(model, keep_io_types=True)
+onnx.save(model_fp16, path)
+print(f'Done. {os.path.getsize(path)/1024/1024:.1f} MB')
+"
+
 echo "=== Build complete ==="
