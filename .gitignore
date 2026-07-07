@@ -9,6 +9,9 @@ env/
 # Large model files — download via download_models.py / convert_fp16.py
 *.onnx
 
+# InsightFace models downloaded at build time
+.insightface_home/
+
 # Python cache
 __pycache__/
 *.py[cod]

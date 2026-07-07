@@ -20,4 +20,13 @@ cd ..
 echo "=== Extracting emap (1 MB projection matrix for latent computation) ==="
 python extract_emap.py
 
+echo "=== Pre-downloading InsightFace buffalo_l into project directory ==="
+export INSIGHTFACE_HOME="$(pwd)/.insightface_home"
+python -c "
+from insightface.app import FaceAnalysis
+app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+app.prepare(ctx_id=0)
+print('buffalo_l ready')
+"
+
 echo "=== Build complete ==="
