@@ -1,6 +1,7 @@
 # Server runtime dependencies
 # Use opencv-python-headless (no display required on Render/Linux)
 fastapi>=0.110.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.29.0
 python-dotenv>=1.0.0
 aiofiles>=23.0.0
