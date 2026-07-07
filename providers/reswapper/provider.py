@@ -1,4 +1,5 @@
 import gc
+import os
 import sys
 import threading
 import time
@@ -49,6 +50,15 @@ def _log(msg: str, level: str = "info"):
         emit(msg, level)
     except Exception:
         pass
+
+
+def _mb(path) -> str:
+    """Return file size as '123.4 MB' or 'not found' if missing."""
+    try:
+        size = Path(path).stat().st_size
+        return f"{size / 1024 / 1024:.1f} MB"
+    except OSError:
+        return "not found"
 
 
 def _set_state(states: dict, key: str, status: str, detail: str = ""):
@@ -203,13 +213,25 @@ class ReswapperProvider:
             _log("Detecting execution provider…")
             name = _auto_detect_provider()
 
+        _log(f"Execution provider: {name.upper()}")
         providers = _resolve_providers(name)
         model_path = _best_model_path(name)
         self.model_file = Path(model_path).name
 
+        # Log buffalo_l model sizes so we know what's on disk before loading
+        _insightface_root = Path(
+            os.environ.get("INSIGHTFACE_HOME", str(Path.home() / ".insightface"))
+        )
+        _buffalo = _insightface_root / "models" / "buffalo_l"
+        _log(
+            f"InsightFace buffalo_l models — "
+            f"det_10g.onnx: {_mb(_buffalo / 'det_10g.onnx')}  |  "
+            f"w600k_r50.onnx: {_mb(_buffalo / 'w600k_r50.onnx')}"
+        )
+
         try:
             _set_state(self.components, "face_detector", "loading", "InsightFace buffalo_l")
-            _log("Loading face detector…")
+            _log("Loading face detector (det_10g + w600k_r50)…")
             self._detector = FaceDetector(
                 providers=providers,
                 det_thresh=config.DET_THRESH,
@@ -226,21 +248,23 @@ class ReswapperProvider:
         # Browser downloads the model and runs swap inference client-side.
         emap_path = Path(config.MODEL_PATH).parent / "emap.npy"
         if name == "cpu" and emap_path.exists():
+            _log(f"CPU mode: loading emap.npy ({_mb(emap_path)}) — browser will run swap inference")
             self._emap = np.load(str(emap_path)).astype(np.float32)
             self.active_provider = "cpu"
             _set_state(self.components, "swap_model", "ready", "emap.npy (browser runs swap)")
             _set_state(self.components, "gpu_provider", "warning", "CPU (no GPU — browser inference)")
-            _log("CPU mode: swap model skipped — browser runs inference, emap loaded from emap.npy", "info")
+            _log("Swap model skipped — emap loaded, browser handles inference", "info")
             self.loaded = True
             _log("All models ready", "success")
             return
 
         try:
             _set_state(self.components, "swap_model", "loading", self.model_file)
+            _model_size = _mb(model_path)
             if "fp16" in self.model_file:
-                _log(f"Loading swap model: {self.model_file} (FP16 — faster performance)…")
+                _log(f"Loading swap model: {self.model_file}  ({_model_size}, FP16)…")
             else:
-                _log(f"Loading swap model: {self.model_file}…")
+                _log(f"Loading swap model: {self.model_file}  ({_model_size}, FP32)…")
             self._swapper = FaceSwapper(model_path=model_path, providers=providers)
         except Exception as e:
             _set_state(self.components, "swap_model", "failed", str(e))
@@ -273,14 +297,14 @@ class ReswapperProvider:
         if self.active_provider == "cpu" and "fp16" in self.model_file:
             fp32_path = config.MODEL_PATH
             _log(
-                "FP16 model is slower on CPU than FP32 — reloading with FP32 model…",
+                f"FP16 model is slower on CPU — reloading FP32: {Path(fp32_path).name} ({_mb(fp32_path)})…",
                 "warning",
             )
             _set_state(self.components, "swap_model", "loading", Path(fp32_path).name)
             try:
                 self._swapper = FaceSwapper(model_path=fp32_path, providers=providers)
                 self.model_file = Path(fp32_path).name
-                _log(f"Reloaded with FP32 model: {self.model_file}", "success")
+                _log(f"Reloaded with FP32 model: {self.model_file} ({_mb(fp32_path)})", "success")
             except Exception as e:
                 _set_state(self.components, "swap_model", "failed", str(e))
                 _log(f"FP32 reload failed: {e}", "error")
