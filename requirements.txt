@@ -13,5 +13,5 @@ requests>=2.31.0
 tqdm>=4.65.0
 
 # Needed at build time to convert FP32 model → FP16
-onnx>=1.14.0
+onnx>=1.14.0,<1.17.0
 onnxconverter-common>=1.13.0
